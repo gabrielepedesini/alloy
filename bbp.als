@@ -9,37 +9,37 @@ sig NonRegisteredUser extends User {}
 sig RegisteredUser extends User {
     email: one String,
     password: one String,
-    verification: one VerificationStatus,
-    paths: set Path,
-    trips: set Trip,
-    favoritePaths: set Path
+    var verification: one VerificationStatus,
+    var paths: set Path,
+    var trips: set Trip,
+    var favoritePaths: set Path
 }
 
 sig Path {
     owner: one RegisteredUser,
-    approval: lone Status,
-    visibility: one Visibility
+    var approval: lone ApprovalStatus,
+    var visibility: one Visibility
 }
 
 sig Trip {
     owner: one RegisteredUser,
+    var recordingState: one RecordingState, 
     followedPath: lone Path
 }
 
 sig Report {
     reportedPath: one Path,
     reporter: one RegisteredUser,
-    approval: lone Status
+    var approval: lone ApprovalStatus
 }
 
-abstract sig VerificationStatus {}
-sig Verified, Unverified extends VerificationStatus {}
+enum VerificationStatus { Verified, Unverified }
 
-abstract sig Status {}
-sig Accepted, Rejected extends Status {}
+enum ApprovalStatus { Accepted, Rejected }
 
-abstract sig Visibility {} 
-sig Private, Public extends Visibility {}
+enum Visibility { Private, Public }
+
+enum RecordingState { Recording, Paused, Ended }
 
 
 // ===========================================
@@ -52,25 +52,65 @@ fact UniqueEmails {
         ru1 != ru2 implies ru1.email != ru2.email
 }
 
-// Ensure registered user is unverified or verified
-fact ValidVerificationStatus {
-    all ru: RegisteredUser | 
-        ru.verification = Verified or ru.verification = Unverified
-}
-
-// Ensure that a registered user is initially unverified and has no paths or trips
-fact InitialUserState {
-    all ru: RegisteredUser | 
-        ru.verification = Unverified and
-        no ru.paths and
-        no ru.trips and
-        no ru.favoritePaths and 
-        no r: Report | r.reporter = ru
-}
-
 // Ensure that registered users and non-registered users are disjoint sets
 fact DisjointUsers {
     no RegisteredUser & NonRegisteredUser
+}
+
+// Ensure registered user verification status evolution
+fact UserVerificationStatusEvolution {
+
+    // Initially, registered user is unverified
+    always all ru: RegisteredUser |
+        once (ru.verification = Unverified)
+
+    // If a user is verified, it must have been unverified before
+    always all ru: RegisteredUser | 
+        ru.verification = Verified implies once (ru.verification = Unverified)
+
+    // Once a user is verified, it must remain verified
+    always all ru: RegisteredUser | 
+        ru.verification = Verified implies after (ru.verification = Verified)
+}
+
+// Ensure registered user paths evoulution
+fact RegisteredUserPathsEvolution { 
+
+    // Initially, registered user has no paths
+    always all ru: RegisteredUser |
+        once (no ru.paths)
+
+    // Paths can only be added if they are owned by the user
+    always all ru: RegisteredUser |
+        all p: ru.paths | p.owner = ru
+}
+
+// Ensure registered user trips evolution
+fact RegisteredUserTripsEvolution { 
+
+    // Initially, registered user has no trips
+    always all ru: RegisteredUser |
+        once (no ru.trips)
+
+    // Trips can only be added if they are owned by the user
+    always all ru: RegisteredUser |
+        all t: ru.trips | t.owner = ru
+}
+
+// Ensure registered user favorite paths evolution
+fact RegisteredUserFavoritePathsEvolution { 
+
+    // Initially, registered user has no favorite paths
+    always all ru: RegisteredUser |
+        once (no ru.favoritePaths)
+
+    // Favorite paths can only be added if they are public
+    always all ru: RegisteredUser |
+        all p: ru.favoritePaths | p.visibility = Public
+
+    // Favorite paths cannot be owned by the user
+    always all ru: RegisteredUser |
+        all p: ru.favoritePaths | p.owner != ru
 }
 
 // Ensure that non-registered users do not have paths, trips, or favorite paths
@@ -81,34 +121,32 @@ fact NonRegisteredUsersHaveNothingAssociated {
         no { p: Path | p in nru.favoritePaths }
 }
 
-// A registered user can only have paths and trips that they own
-fact UsersCanOnlyHaveTheirOwnPathsAndTrips {
-    all ru: RegisteredUser | 
-        ru.paths in { p: Path | p.owner = ru } and
-        ru.trips in { t: Trip | t.owner = ru }
-}
+// Ensure valid evolution of path lifecycle
+fact PathLifecycle {
 
-// Ensure that paths owned by registered users are either public or private
-fact PathVisibility {
-    all p: Path | p.visibility = Private or p.visibility = Public
-}
+    // Initially the path is private and there is no approval
+    always all p: Path |
+        once (p.visibility = Private and no p.approval)
 
-// Ensure that a path can be public only after being accepted
-fact PublicPathsMustBeAccepted {
-    all p: Path | 
-        p.visibility = Public implies p.approval = Accepted
-}
+    // If approval is Rejected, visibility must always stay Private
+    always all p: Path |
+        (p.approval = Rejected implies always (p.visibility = Private))
 
-// A registered user cannot put their own paths in their favorites
-fact OwnerCannotPutOwnPathInFavorites {
-    all ru: RegisteredUser |
-        no p: ru.favoritePaths | p.owner = ru
-}
+    // If approval is still not present, visibility must always stay Private
+    always all p: Path |
+        (no p.approval implies always (p.visibility = Private))
 
-// Ensure that registered users can favorite only public paths
-fact RegisteredUsersCanOnlyFavoritePublicPaths {
-    all ru: RegisteredUser | 
-        all p: ru.favoritePaths | p.visibility = Public
+    // If approval is Accepted, visibility can change to Public only after approval
+    always all p: Path |
+        (p.approval = Accepted implies after (p.visibility = Private or p.visibility = Public))
+
+    // Once a path is Accepted, it must remain Accepted
+    always all p: Path |
+        (p.approval = Accepted implies after always (p.approval = Accepted))
+
+    // If a path is Public, it has to be Accepted
+    always all p: Path |
+        (p.visibility = Public implies p.approval = Accepted)
 }
 
 // Ensure that trips are related only to path that are owned by the trip owner or public paths
@@ -118,9 +156,28 @@ fact TripPathsOwnershipOrPublic {
             p.owner = t.owner or p.visibility = Public
 }
 
-// Ensure that if there is at least a path or a trip, there is at least one registered user
-fact AtLeastOneRegisteredUserIfPathsOrTripsExist {
-    (some Path or some Trip) implies some RegisteredUser
+// Ensure valid evolution of trip recording states
+fact TripRecordingStateEvolution {
+
+    // Initially, the trip is in Recording state
+    always all t: Trip |
+        once (t.recordingState = Recording)
+
+    // Paused has to come from Recording
+    always all t: Trip |
+        (t.recordingState = Paused implies once (t.recordingState = Recording and t.recordingState' = Paused))
+
+    // Ended has to come from Recording or Paused
+    always all t: Trip |
+        (t.recordingState = Ended implies once ((t.recordingState = Recording or t.recordingState = Paused) and t.recordingState' = Ended))
+
+    // From Paused, it is possible to return to Recording or go to Ended
+    always all t: Trip |
+        (t.recordingState = Paused implies t.recordingState' in Recording + Ended)
+
+    // Once Ended, it is not possible to go back
+    always all t: Trip |
+        (t.recordingState = Ended implies after always (t.recordingState != Recording and t.recordingState != Paused))
 }
 
 // Ensure a report is created by a registered user for a path that he does not own
@@ -134,17 +191,27 @@ fact ReportedPathIsPublic {
     all r: Report | r.reportedPath.visibility = Public
 }
 
-// Ensure that reports that are create eventually get accepted or rejected
-fact EachReportEventuallyGetsStatus {
-    all r: Report | 
-        (no r.approval) implies eventually some r.approval
+// Ensure valid evolution of report approval status
+fact ReportApprovalStatusEvolution {
+
+    // Initially, approval is absent
+    always all r: Report | 
+        once (r.approval = none)
+
+    // If approval exists, it must have been none before
+    always all r: Report |
+        (r.approval in ApprovalStatus implies once (r.approval = none and r.approval' in ApprovalStatus))
+}
+
+// Ensure that if there is at least a path or a trip, there is at least one registered user
+fact AtLeastOneRegisteredUserIfPathsOrTripsExist {
+    (some Path or some Trip) implies some RegisteredUser
 }
 
 
 // ===========================================
 // PREDICATES
 // ===========================================
-
 
 // A new registered user is created and verified
 pred RegisterUser[ru: RegisteredUser] {
@@ -211,7 +278,6 @@ pred ReportPath [ru: RegisteredUser, p: Path, r: Report] {
 // FUNCTIONS
 // ===========================================
 
-
 // All public paths in the system
 fun publicPaths: set Path {
     {p: Path | p.visibility = Public}
@@ -228,7 +294,7 @@ fun verifiedUsers: set RegisteredUser {
 }
 
 // All paths available to a given user (their own + public)
-fun availablePath: set Path {
+fun availablePath[ru: RegisteredUser]: set Path {
     {p: Path | p.visibility = Public or p.owner = ru}
 }
 
@@ -246,7 +312,6 @@ fun reportedPath: set Path {
 // ===========================================
 // ASSERTIONS
 // ===========================================
-
 
 // No user can favorite their own path
 assert NoSelfFavorite {
