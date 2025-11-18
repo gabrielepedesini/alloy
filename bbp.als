@@ -52,11 +52,6 @@ fact UniqueEmails {
         ru1 != ru2 implies ru1.email != ru2.email
 }
 
-// Ensure that registered users and non-registered users are disjoint sets
-fact DisjointUsers {
-    no RegisteredUser & NonRegisteredUser
-}
-
 // Ensure registered user verification status evolution
 fact UserVerificationStatusEvolution {
 
@@ -95,6 +90,13 @@ fact RegisteredUserTripsEvolution {
     // Trips can only be added if they are owned by the user
     always all ru: RegisteredUser |
         all t: ru.trips | t.owner = ru
+
+    // A single registered user cannot have two trips in Recording or Pause state at the same time
+    always all ru: RegisteredUser |
+        no t1, t2: ru.trips | 
+            t1 != t2 and 
+            (t1.recordingState = Recording or t1.recordingState = Paused) and 
+            (t2.recordingState = Recording or t2.recordingState = Paused)
 }
 
 // Ensure registered user favorite paths evolution
@@ -111,14 +113,6 @@ fact RegisteredUserFavoritePathsEvolution {
     // Favorite paths cannot be owned by the user
     always all ru: RegisteredUser |
         all p: ru.favoritePaths | p.owner != ru
-}
-
-// Ensure that non-registered users do not have paths, trips, or favorite paths
-fact NonRegisteredUsersHaveNothingAssociated {
-    all nru: NonRegisteredUser |
-        no { p: Path | p.owner = nru } and
-        no { t: Trip | t.owner = nru } and
-        no { p: Path | p in nru.favoritePaths }
 }
 
 // Ensure valid evolution of path lifecycle
@@ -173,7 +167,7 @@ fact TripRecordingStateEvolution {
 
     // From Paused, it is possible to return to Recording or go to Ended
     always all t: Trip |
-        (t.recordingState = Paused implies t.recordingState' in Recording + Ended)
+        (t.recordingState = Paused implies t.recordingState' = Recording or t.recordingState' = Ended)
 
     // Once Ended, it is not possible to go back
     always all t: Trip |
@@ -238,12 +232,6 @@ pred CreatePath [ru: RegisteredUser, p: Path] {
     p in ru.paths
 }
 
-// The system accepts a path for publication
-pred PublishPath [p: Path] {
-    p.approval = Accepted
-    p.visibility = Public
-}
-
 // The system rejects a path for publication
 pred RejectPath [p: Path] {
     p.approval = Rejected
@@ -273,6 +261,45 @@ pred ReportPath [ru: RegisteredUser, p: Path, r: Report] {
     r.reportedPath = p
 }
 
+// Pauses an active trip
+pred PauseTrip[ru: RegisteredUser, t: Trip] {
+    t.owner = ru
+    t.recordingState = Recording
+    t.recordingState' = Paused
+}
+
+// Resumes a paused trip
+pred ResumeTrip[ru: RegisteredUser, t: Trip] {
+    t.owner = ru
+    t.recordingState = Paused
+    t.recordingState' = Recording
+}
+
+// Ends a trip from recording or paused state
+pred EndTrip[ru: RegisteredUser, t: Trip] {
+    t.owner = ru
+    (t.recordingState = Recording or t.recordingState = Paused)
+    t.recordingState' = Ended
+}
+
+// Approves a report
+pred ApproveReport[r: Report] {
+    r.approval = none
+    r.approval' = Accepted
+}
+
+// Rejects a report
+pred RejectReport[r: Report] {
+    r.approval = none
+    r.approval' = Rejected
+}
+
+// Removes a path from favorites
+pred RemoveFavorite[ru: RegisteredUser, p: Path] {
+    p in ru.favoritePaths
+    p not in ru.favoritePaths'
+}
+
 
 // ===========================================
 // FUNCTIONS
@@ -300,12 +327,32 @@ fun availablePath[ru: RegisteredUser]: set Path {
 
 // All reports awaiting approval
 fun waitingReports: set Report {
-    {r: Report | r.approval = Accepted}
+    {r: Report | no r.approval}
 }
 
 // Paths reported by at least one user
 fun reportedPath: set Path {
     {r: Report.reportedPath}
+}
+
+// Trips in Recording or Paused state for a user
+fun activeTrips[ru: RegisteredUser]: set Trip {
+    {t: ru.trips | t.recordingState = Recording or t.recordingState = Paused}
+}
+
+// Reports without approval
+fun pendingReports: set Report {
+    {r: Report | no r.approval}
+}
+
+// Paths owned by a user
+fun userOwnedPaths[ru: RegisteredUser]: set Path {
+    {p: Path | p.owner = ru}
+}
+
+// Paths with at least one report
+fun reportedPaths: set Path {
+    {p: Path | some r: Report | r.reportedPath = p}
 }
 
 
@@ -326,4 +373,29 @@ assert PublicPathsAreAccepted {
 // Every report refers to a public path
 assert ReportsOnPublicPaths {
     all r: Report | r.reportedPath.visibility = Public
+}
+
+// Ensures no user has multiple active trips
+assert UniqueActiveTripsPerUser {
+    all ru: RegisteredUser | lone activeTrips[ru]
+}
+
+// Verified users remain verified
+assert VerifiedUsersStayVerified {
+    all ru: RegisteredUser | ru.verification = Verified implies always ru.verification = Verified
+}
+
+// Private paths have no approval
+assert PrivatePathsUnapproved {
+    all p: Path | p.visibility = Private implies no p.approval
+}
+
+// Ended trips don't change state
+assert EndedTripsStayEnded {
+    all t: Trip | t.recordingState = Ended implies always t.recordingState = Ended
+}
+
+// Reports are only by non-owners
+assert ReportsByNonOwners {
+    all r: Report | r.reporter != r.reportedPath.owner
 }
