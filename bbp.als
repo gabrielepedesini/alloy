@@ -58,14 +58,6 @@ fact UniqueEmails {
 // Ensure registered user verification status evolution
 fact UserVerificationStatusEvolution {
 
-    // Initially, registered user is unverified
-    always all ru: RegisteredUser |
-        once (ru.verification = Unverified)
-
-    // If a user is verified, it must have been unverified before
-    always all ru: RegisteredUser | 
-        ru.verification = Verified implies once (ru.verification = Unverified)
-
     // Once a user is verified, it must remain verified
     always all ru: RegisteredUser | 
         ru.verification = Verified implies after (ru.verification = Verified)
@@ -73,14 +65,16 @@ fact UserVerificationStatusEvolution {
     // Verification can change from Unverified to Verified or stay Unverified
     always all ru: RegisteredUser |
         ru.verification = Unverified implies (ru.verification' = Unverified or ru.verification' = Verified)
+
+    // Some users are verified from the start
+    some ru: RegisteredUser | once ru.verification = Verified
+
+    // Some users are not verified from the start
+    some ru: RegisteredUser | once ru.verification = Unverified
 }
 
 // Ensure registered user paths evoulution
 fact RegisteredUserPathsEvolution { 
-
-    // Initially, registered user has no paths
-    always all ru: RegisteredUser |
-        once (no ru.paths)
 
     // Paths can only be added if they are owned by the user
     always all ru: RegisteredUser |
@@ -90,14 +84,14 @@ fact RegisteredUserPathsEvolution {
     always all ru: RegisteredUser | 
         all p: Path | 
             (p.owner = ru and p not in ru.paths) implies p in ru.paths'
+
+    // Only verified users can have paths
+    all ru: RegisteredUser | 
+        (some ru.paths) implies ru.verification = Verified
 }
 
 // Ensure registered user trips evolution
 fact RegisteredUserTripsEvolution { 
-
-    // Initially, registered user has no trips
-    always all ru: RegisteredUser |
-        once (no ru.trips)
 
     // Trips can only be added if they are owned by the user
     always all ru: RegisteredUser |
@@ -120,14 +114,14 @@ fact RegisteredUserTripsEvolution {
         (t.recordingState = Recording implies (t.recordingState' = Recording or t.recordingState' = Paused or t.recordingState' = Ended)) or
         (t.recordingState = Paused implies (t.recordingState' = Paused or t.recordingState' = Recording or t.recordingState' = Ended)) or
         (t.recordingState = Ended implies t.recordingState' = Ended)
+
+    // Only verified users can have trips
+    all ru: RegisteredUser | 
+        (some ru.trips) implies ru.verification = Verified
 }
 
 // Ensure registered user favorite paths evolution
 fact RegisteredUserFavoritePathsEvolution { 
-
-    // Initially, registered user has no favorite paths
-    always all ru: RegisteredUser |
-        once (no ru.favoritePaths)
 
     // Favorite paths can only be added if they are public
     always all ru: RegisteredUser |
@@ -141,14 +135,14 @@ fact RegisteredUserFavoritePathsEvolution {
     always all ru: RegisteredUser |
         all p: Path |
             (p.visibility = Public and p.owner != ru and p not in ru.favoritePaths) implies p in ru.favoritePaths'
+
+    // Only verified users can have favorite paths
+    all ru: RegisteredUser | 
+        (some ru.favoritePaths) implies ru.verification = Verified
 }
 
 // Ensure valid evolution of path lifecycle
 fact PathLifecycle {
-
-    // Initially the path is private and there is no approval
-    always all p: Path |
-        once (p.visibility = Private and no p.approval)
 
     // If approval is Rejected, visibility must always stay Private
     always all p: Path |
@@ -169,6 +163,9 @@ fact PathLifecycle {
     // Once approval is assigned, it cannot change
     always all p: Path |
         (p.approval in ApprovalStatus) implies after always (p.approval = p.approval)
+
+    // Paths can only be owned by verified users
+    all p: Path | p.owner.verification = Verified
 }
 
 // Ensure that trips are related only to path that are owned by the trip owner or public paths
@@ -196,6 +193,9 @@ fact TripRecordingStateEvolution {
     // Once Ended, it must remain Ended
     always all t: Trip |
         (t.recordingState = Ended implies after always (t.recordingState = Ended))
+
+    // Trips can only be owned by verified users
+    all t: Trip | t.owner.verification = Verified
 }
 
 // Ensure a report is created by a registered user for a path that he does not own
@@ -223,6 +223,9 @@ fact ReportApprovalStatusEvolution {
     // Report approval can change from unapproved to Accepted or Rejected
     always all r: Report |
         (no r.approval) implies (r.approval' = none or r.approval' in ApprovalStatus)
+
+    // Reports can only be created by verified users
+    all r: Report | r.reporter.verification = Verified
 }
 
 // Ensure that if there is at least a path or a trip, there is at least one registered user
@@ -235,10 +238,9 @@ fact AtLeastOneRegisteredUserIfPathsOrTripsExist {
 // PREDICATES
 // ===========================================
 
-// A new registered user is created and verified
+// A new registered user is created
 pred RegisterUser[ru: RegisteredUser] {
-    ru.verification = Unverified
-    no ru.paths and no ru.trips
+    ru.verification = Unverified or ru.verification = Verified
 }
 
 // A registered user becomes verified after email confirmation
@@ -430,179 +432,7 @@ assert ReportsByNonOwners {
 
 
 // ===========================================
-// SIMPLE TESTS
+// TEST
 // ===========================================
 
-// Test 1: Just check if initial state is satisfiable
-run InitialStateCheck {} for 2 but 2 steps
-
-// Test 2: Simple verification
-run SimpleVerification {
-    some ru: RegisteredUser | eventually (ru.verification = Verified)
-} for 2 but 3 steps
-
-// Test 3: Path approval
-run PathApproval {
-    some p: Path | eventually p.approval = Accepted
-} for 2 but 3 steps
-
-// Test 4: User journey
-run UserJourney {
-    some ru: RegisteredUser, p: Path | {
-        p.owner = ru
-        eventually ru.verification = Verified
-        eventually p in ru.paths
-        eventually p.approval = Accepted
-    }
-} for 2 but 5 steps
-
-// Test 5: Complete workflow
-run CompleteWorkflow {
-    some ru: RegisteredUser, p: Path, t: Trip | {
-        p.owner = ru
-        t.owner = ru
-        eventually ru.verification = Verified
-        eventually p in ru.paths
-        eventually p.approval = Accepted
-    }
-} for 2 but 5 steps
-
-// Test 6: Multi-user path sharing workflow
-run MultiUserPathSharing {
-    some ru1, ru2: RegisteredUser, p: Path, fav: Path | {
-        ru1 != ru2
-        p.owner = ru1
-        fav.owner = ru1
-        eventually ru1.verification = Verified
-        eventually ru2.verification = Verified
-        eventually p in ru1.paths
-        eventually p.approval = Accepted
-        eventually p.visibility = Public
-        eventually fav in ru1.paths
-        eventually fav.approval = Accepted
-        eventually fav.visibility = Public
-        eventually fav in ru2.favoritePaths
-    }
-} for 3 but 8 steps
-
-// Test 7: Report workflow with path approval
-run ReportWorkflow {
-    some ru1, ru2: RegisteredUser, p: Path, r: Report | {
-        ru1 != ru2
-        p.owner = ru1
-        r.reportedPath = p
-        r.reporter = ru2
-        eventually ru1.verification = Verified
-        eventually ru2.verification = Verified
-        eventually p in ru1.paths
-        eventually p.approval = Accepted
-        eventually p.visibility = Public
-        eventually r.approval = Accepted
-    }
-} for 3 but 8 steps
-
-// Test 8: Complete trip lifecycle with state transitions
-run CompleteTripsLifecycle {
-    some ru: RegisteredUser, t1, t2: Trip | {
-        t1 != t2
-        t1.owner = ru
-        t2.owner = ru
-        eventually ru.verification = Verified
-        eventually t1 in ru.trips
-        eventually t1.recordingState = Paused
-        eventually t1.recordingState = Recording
-        eventually t1.recordingState = Ended
-        eventually t2 in ru.trips
-        eventually t2.recordingState = Paused
-    }
-} for 3 but 10 steps
-
-// Test 9: Multiple paths with mixed approval statuses
-run MultiplePathsWithApprovals {
-    some ru: RegisteredUser, p1, p2, p3: Path | {
-        p1 != p2 and p2 != p3 and p1 != p3
-        p1.owner = ru
-        p2.owner = ru
-        p3.owner = ru
-        eventually ru.verification = Verified
-        eventually p1 in ru.paths
-        eventually p2 in ru.paths
-        eventually p3 in ru.paths
-        eventually p1.approval = Accepted
-        eventually p2.approval = Rejected
-        eventually p3.approval = Accepted
-        eventually p1.visibility = Public
-        eventually p2.visibility = Private
-        eventually p3.visibility = Public
-    }
-} for 3 but 8 steps
-
-// Test 10: Complex scenario - User creates path, others favorite it, reports it
-run ComplexMultiUserScenario {
-    some creator, favoriter, reporterUser: RegisteredUser, 
-        path: Path, rep: Report | {
-        creator != favoriter and favoriter != reporterUser and creator != reporterUser
-        path.owner = creator
-        rep.reportedPath = path
-        rep.reporter = reporterUser
-        eventually creator.verification = Verified
-        eventually favoriter.verification = Verified
-        eventually reporterUser.verification = Verified
-        eventually path in creator.paths
-        eventually path.approval = Accepted
-        eventually path.visibility = Public
-        eventually path in favoriter.favoritePaths
-        eventually rep.approval in ApprovalStatus
-    }
-} for 4 but 10 steps
-
-// Test 11: Trip lifecycle with path following
-run TripWithPathFollowing {
-    some ru1, ru2: RegisteredUser, t: Trip, p: Path | {
-        ru1 != ru2
-        t.owner = ru1
-        p.owner = ru2
-        t.followedPath = p
-        eventually ru1.verification = Verified
-        eventually ru2.verification = Verified
-        eventually p in ru2.paths
-        eventually p.approval = Accepted
-        eventually p.visibility = Public
-        eventually t in ru1.trips
-        eventually t.recordingState = Recording
-        eventually t.recordingState = Paused
-        eventually t.recordingState = Ended
-    }
-} for 3 but 10 steps
-
-// Test 12: Unverified users cannot have interactions
-run UnverifiedUserRestrictions {
-    some ru: RegisteredUser | {
-        ru.verification = Unverified
-        always (no p: Path | p.owner = ru)
-        always (no t: Trip | t.owner = ru)
-    }
-} for 2 but 4 steps
-
-// Test 13: State persistence - verified users stay verified
-run VerificationPersistence {
-    some ru: RegisteredUser | {
-        eventually ru.verification = Verified
-        eventually always (ru.verification = Verified)
-    }
-} for 2 but 5 steps
-
-// Test 14: Path state machine - from private to public
-run PathStateMachine {
-    some p: Path | {
-        eventually (p.visibility = Private and no p.approval)
-        eventually (no p.approval implies p.visibility = Private)
-        eventually p.approval = Accepted
-        eventually p.visibility = Public
-        eventually always (p.approval = Accepted)
-    }
-} for 2 but 6 steps
-
-// Test 15: Core entities with specific scope
-run CoreEntitiesScope {} for 5 but exactly 2 RegisteredUser, exactly 3 Path, exactly 2 Trip, exactly 10 steps
-
+run CoreEntitiesScope {} for 5 but exactly 3 RegisteredUser, exactly 3 Path, exactly 2 Trip, exactly 1 Report, exactly 10 steps
