@@ -190,6 +190,12 @@ fact TripRecordingStateEvolution {
     always all t: Trip |
         (t.recordingState = Ended implies after always (t.recordingState = Ended))
 
+    // Two trips related to the same owner cannot be in Recording or Paused state at the same time
+    always all t1, t2: Trip |
+        (t1.owner = t2.owner and t1 != t2) implies 
+            not ((t1.recordingState = Recording or t1.recordingState = Paused) and 
+                 (t2.recordingState = Recording or t2.recordingState = Paused))
+
     // Trips can only be owned by verified users
     all t: Trip | t.owner.verification = Verified
 }
