@@ -190,6 +190,10 @@ fact TripRecordingStateEvolution {
     always all t: Trip |
         (t.recordingState = Ended implies after always (t.recordingState = Ended))
 
+    // Eventually, all trips end
+    always all t: Trip |
+        eventually (t.recordingState = Ended)
+
     // Two trips related to the same owner cannot be in Recording or Paused state at the same time
     always all t1, t2: Trip |
         (t1.owner = t2.owner and t1 != t2) implies 
@@ -225,6 +229,10 @@ fact ReportApprovalStatusEvolution {
     // Report approval can change from unapproved to Accepted or Rejected
     always all r: Report |
         (no r.approval) implies (r.approval' = none or r.approval' in ApprovalStatus)
+
+    // Once approval is assigned, it cannot change
+    always all r: Report |
+        (r.approval in ApprovalStatus) implies after always (r.approval = r.approval)
 
     // Eventually, all reports get an approval status
     always all r: Report |
