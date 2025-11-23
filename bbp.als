@@ -220,6 +220,10 @@ fact ReportApprovalStatusEvolution {
     always all r: Report |
         (no r.approval) implies (r.approval' = none or r.approval' in ApprovalStatus)
 
+    // Eventually, all reports get an approval status
+    always all r: Report |
+        (no r.approval) implies eventually (some r.approval)
+
     // Reports can only be created by verified users
     all r: Report | r.reporter.verification = Verified
 }
@@ -227,103 +231,6 @@ fact ReportApprovalStatusEvolution {
 // Ensure that if there is at least a path or a trip, there is at least one registered user
 fact AtLeastOneRegisteredUserIfPathsOrTripsExist {
     (some Path or some Trip) implies some RegisteredUser
-}
-
-
-// ===========================================
-// PREDICATES
-// ===========================================
-
-// A new registered user is created
-pred RegisterUser[ru: RegisteredUser] {
-    ru.verification = Unverified or ru.verification = Verified
-}
-
-// A registered user becomes verified after email confirmation
-pred VerifyUser[ru: RegisteredUser] {
-    ru.verification = Verified
-}
-
-// A registered user records a trip
-pred RecordTrip[ru: RegisteredUser, t: Trip] {
-    t.owner = ru
-    t.followedPath = none or t.followedPath.visibility = Public or t.followedPath.owner = ru
-}
-
-// A registered user creates a new path (still not approved)
-pred CreatePath [ru: RegisteredUser, p: Path] {
-    p.owner = ru
-    p.visibility = Private
-    p.approval = none
-    p in ru.paths
-}
-
-// The system rejects a path for publication
-pred RejectPath [p: Path] {
-    p.approval = Rejected
-    p.visibility = Private
-}
-
-// A registered user publishes a path
-pred PublishPath [ru: RegisteredUser, p: Path] {
-    p.owner = ru
-    p.approval = Accepted
-    p.visibility = Public
-    p in ru.paths
-}
-
-// A registered user adds a path to favorites
-pred FavoritePath [ru: RegisteredUser, p: Path] {
-    p.owner != ru
-    p.visibility = Public
-    p in ru.favoritePaths
-}
-
-// A registered user reports a problem with a public path
-pred ReportPath [ru: RegisteredUser, p: Path, r: Report] {
-    p.owner != ru
-    p.visibility = Public
-    r.reporter = ru
-    r.reportedPath = p
-}
-
-// Pauses an active trip
-pred PauseTrip[ru: RegisteredUser, t: Trip] {
-    t.owner = ru
-    t.recordingState = Recording
-    t.recordingState' = Paused
-}
-
-// Resumes a paused trip
-pred ResumeTrip[ru: RegisteredUser, t: Trip] {
-    t.owner = ru
-    t.recordingState = Paused
-    t.recordingState' = Recording
-}
-
-// Ends a trip from recording or paused state
-pred EndTrip[ru: RegisteredUser, t: Trip] {
-    t.owner = ru
-    (t.recordingState = Recording or t.recordingState = Paused)
-    t.recordingState' = Ended
-}
-
-// Approves a report
-pred ApproveReport[r: Report] {
-    r.approval = none
-    r.approval' = Accepted
-}
-
-// Rejects a report
-pred RejectReport[r: Report] {
-    r.approval = none
-    r.approval' = Rejected
-}
-
-// Removes a path from favorites
-pred RemoveFavorite[ru: RegisteredUser, p: Path] {
-    p in ru.favoritePaths
-    p not in ru.favoritePaths'
 }
 
 
