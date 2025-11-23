@@ -6,11 +6,7 @@ sig Email {} {
     Email = RegisteredUser.email
 }
 
-abstract sig User {}
-
-sig NonRegisteredUser extends User {}
-
-sig RegisteredUser extends User {
+sig RegisteredUser {
     email: one Email,
     var verification: one VerificationStatus,
     var paths: set Path,
@@ -332,61 +328,6 @@ pred RemoveFavorite[ru: RegisteredUser, p: Path] {
 
 
 // ===========================================
-// FUNCTIONS
-// ===========================================
-
-// All public paths in the system
-fun publicPaths: set Path {
-    {p: Path | p.visibility = Public}
-}
-
-// All private paths in the system
-fun privatePaths: set Path {
-    {p: Path | p.visibility = Private}
-}
-
-// All verified users
-fun verifiedUsers: set RegisteredUser {
-    {ru: RegisteredUser | ru.verification = Verified}
-}
-
-// All paths available to a given user (their own + public)
-fun availablePath[ru: RegisteredUser]: set Path {
-    {p: Path | p.visibility = Public or p.owner = ru}
-}
-
-// All reports awaiting approval
-fun waitingReports: set Report {
-    {r: Report | no r.approval}
-}
-
-// Paths reported by at least one user
-fun reportedPath: set Path {
-    {r: Report.reportedPath}
-}
-
-// Trips in Recording or Paused state for a user
-fun activeTrips[ru: RegisteredUser]: set Trip {
-    {t: ru.trips | t.recordingState = Recording or t.recordingState = Paused}
-}
-
-// Reports without approval
-fun pendingReports: set Report {
-    {r: Report | no r.approval}
-}
-
-// Paths owned by a user
-fun userOwnedPaths[ru: RegisteredUser]: set Path {
-    {p: Path | p.owner = ru}
-}
-
-// Paths with at least one report
-fun reportedPaths: set Path {
-    {p: Path | some r: Report | r.reportedPath = p}
-}
-
-
-// ===========================================
 // ASSERTIONS
 // ===========================================
 
@@ -407,7 +348,7 @@ assert ReportsOnPublicPaths {
 
 // Ensures no user has multiple active trips
 assert UniqueActiveTripsPerUser {
-    all ru: RegisteredUser | lone activeTrips[ru]
+    all ru: RegisteredUser | lone {t: ru.trips | t.recordingState = Recording or t.recordingState = Paused}
 }
 
 // Verified users remain verified
@@ -435,4 +376,4 @@ assert ReportsByNonOwners {
 // TEST
 // ===========================================
 
-run CoreEntitiesScope {} for 5 but exactly 3 RegisteredUser, exactly 3 Path, exactly 2 Trip, exactly 1 Report, exactly 10 steps
+run CoreEntitiesScope {} for 5 but exactly 4 RegisteredUser, exactly 3 Path, exactly 3 Trip, exactly 1 Report, exactly 10 steps
